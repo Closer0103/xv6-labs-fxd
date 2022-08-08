@@ -34,12 +34,6 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
   }
   kvminithart();
 }
@@ -115,11 +109,29 @@ found:
 
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
-  if(p->pagetable == 0){
+  if(p->pagetable == 0)
+  {
     freeproc(p);
     release(&p->lock);
     return 0;
   }
+
+  /*完成内核页表空间的初始化*/
+  p->kernel_pgtbl=ukvminit();
+  if(p->kernel_pgtbl==0)
+  {
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
+  /*对内核栈进行初始化*/
+  char *pa = kalloc();
+  if(pa == 0)
+      panic("kalloc");
+  uint64 va = KSTACK((int) (p - proc));
+  ukvmmap(p->kernel_pgtbl,va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -139,8 +151,31 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+
+  /*删除内核项*/
+  if(p->kstack)
+  {
+    // 寻找最后一级的页表项
+    pte_t* pte=walk(p->kernel_pgtbl,p->kstack,0);
+    if(pte==0)
+    {
+      panic("free kstack");
+    }
+    // free页表项的物理地址
+    kfree((void*)PTE2PA(*pte));
+  }
+  p->kstack=0;
+
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+
+  // delete kernel pagetable
+  if(p->kernel_pgtbl)
+  {
+    proc_freewalk(p->kernel_pgtbl);
+  }
+  p->kernel_pgtbl=0;
+  
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -150,6 +185,8 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  
+ 
 }
 
 // Create a user page table for a given process,
@@ -220,6 +257,7 @@ userinit(void)
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
+  kvmcopymappings(p->pagetable, p->kernel_pgtbl, 0, p->sz); 
 
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
@@ -242,13 +280,28 @@ growproc(int n)
   struct proc *p = myproc();
 
   sz = p->sz;
-  if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+  if(n > 0)
+  {
+    uint64 newsz;
+    if((newsz = uvmalloc(p->pagetable, sz, sz + n)) == 0) 
+    {
       return -1;
     }
-  } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    
+    if(kvmcopymappings(p->pagetable, p->kernel_pgtbl, sz, n) != 0) 
+    {
+      uvmdealloc(p->pagetable, newsz, sz);
+      return -1;
+    }
+    sz = newsz;
   }
+  else if(n < 0)
+  {
+    uvmdealloc(p->pagetable, sz, sz + n);
+    
+    sz = kvmdealloc(p->kernel_pgtbl, sz, sz + n);
+  }
+
   p->sz = sz;
   return 0;
 }
@@ -268,7 +321,8 @@ fork(void)
   }
 
   // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0||kvmcopymappings(np->pagetable, np->kernel_pgtbl, 0, p->sz) < 0)
+  {
     freeproc(np);
     release(&np->lock);
     return -1;
@@ -471,10 +525,16 @@ scheduler(void)
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+
+        w_satp(MAKE_SATP(p->kernel_pgtbl));
+        
+        sfence_vma();//清除快表的缓存
+
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
 
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
