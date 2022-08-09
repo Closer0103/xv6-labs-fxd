@@ -5,7 +5,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 
-#define NBUCKET 5
+#define NBUCKET 50
 #define NKEYS 100000
 
 struct entry {
@@ -14,6 +14,7 @@ struct entry {
   struct entry *next;
 };
 struct entry *table[NBUCKET];
+pthread_mutex_t lock[NBUCKET];            // 互斥锁
 int keys[NKEYS];
 int nthread = 1;
 
@@ -40,7 +41,7 @@ void put(int key, int value)
 {
   int i = key % NBUCKET;
 
-  // is the key already present?
+  pthread_mutex_lock(&lock[i]);       // 加锁
   struct entry *e = 0;
   for (e = table[i]; e != 0; e = e->next) {
     if (e->key == key)
@@ -49,23 +50,26 @@ void put(int key, int value)
   if(e){
     // update the existing key.
     e->value = value;
-  } else {
+  } else 
+  {
     // the new is new.
+    
     insert(key, value, &table[i], table[i]);
   }
+  
+    pthread_mutex_unlock(&lock[i]);     // 解锁
 }
 
 static struct entry*
 get(int key)
 {
   int i = key % NBUCKET;
-
-
+  pthread_mutex_lock(&lock[i]);       // 加锁
   struct entry *e = 0;
   for (e = table[i]; e != 0; e = e->next) {
     if (e->key == key) break;
   }
-
+  pthread_mutex_unlock(&lock[i]);       // 解锁
   return e;
 }
 
@@ -87,7 +91,6 @@ get_thread(void *xa)
 {
   int n = (int) (long) xa; // thread number
   int missing = 0;
-
   for (int i = 0; i < NKEYS; i++) {
     struct entry *e = get(keys[i]);
     if (e == 0) missing++;
@@ -103,6 +106,11 @@ main(int argc, char *argv[])
   void *value;
   double t1, t0;
 
+  for (int i = 0; i < NBUCKET; i++) 
+  {
+    pthread_mutex_init(&lock[i], NULL); // 对锁进行初始化
+  }
+  
   if (argc < 2) {
     fprintf(stderr, "Usage: %s nthreads\n", argv[0]);
     exit(-1);
@@ -114,6 +122,8 @@ main(int argc, char *argv[])
   for (int i = 0; i < NKEYS; i++) {
     keys[i] = random();
   }
+
+  
 
   //
   // first the puts
