@@ -7,6 +7,8 @@
 #include "spinlock.h"
 #include "proc.h"
 
+#define MMAPMINADDR (TRAPFRAME - 10 * PGSIZE)
+
 uint64
 sys_exit(void)
 {
@@ -95,3 +97,5 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+

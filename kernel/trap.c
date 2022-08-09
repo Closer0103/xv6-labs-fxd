@@ -5,6 +5,11 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sleeplock.h"  
+#include "fs.h"     
+#include "file.h"   
+#include "fcntl.h"  
+
 
 struct spinlock tickslock;
 uint ticks;
@@ -50,7 +55,8 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  if(r_scause() == 8)
+  {
     // system call
 
     if(p->killed)
@@ -65,9 +71,74 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  }
+  else if (r_scause() == 12 || r_scause() == 13|| r_scause() == 15) // mmap page fault 
+  { 
+    char *pa;
+    uint64 va = PGROUNDDOWN(r_stval());
+    struct vm_area *vma = 0;
+    int flags = PTE_U;
+    int i;
+    // find the VMA
+    for (i = 0; i < NVMA; ++i) 
+    {
+      //判断地址是否有效
+      if (p->vma[i].addr && va >= p->vma[i].addr&& va < p->vma[i].addr + p->vma[i].len) 
+      {
+        vma = &p->vma[i];
+        break;
+      }
+    }
+    if (!vma) 
+    {
+      goto err;
+    }
+    // 给对应的页设置脏页标记
+    if (r_scause() == 15 && (vma->permisson & PROT_WRITE)&& walkaddr(p->pagetable, va)) 
+    {
+      if (uvmsetdirtywrite(p->pagetable, va)) 
+      {
+        goto err;
+      }
+    }
+    else//分配一个新物理页并对其进行初始化 
+    {
+      if ((pa = kalloc()) == 0) 
+      {
+        goto err;
+      }
+      memset(pa, 0, PGSIZE);
+      ilock(vma->f->ip);
+      if (readi(vma->f->ip, 0, (uint64) pa, va - vma->addr + vma->offset, PGSIZE) < 0) 
+      {
+        iunlock(vma->f->ip);
+        goto err;
+      }
+      iunlock(vma->f->ip);
+      if ((vma->permisson & PROT_READ)) 
+      {
+        flags |= PTE_R;
+      }
+      // 给刚分配的页设置对应权限
+      if (r_scause() == 15 && (vma->permisson & PROT_WRITE)) 
+      {
+        flags |= PTE_W | PTE_D;
+      }
+      if ((vma->permisson & PROT_EXEC)) 
+      {
+        flags |= PTE_X;
+      }
+      if (mappages(p->pagetable, va, PGSIZE, (uint64) pa, flags) != 0)
+      {
+        kfree(pa);
+        goto err;
+      }
+    }
+  } 
+  else if((which_dev = devintr()) != 0){
     // ok
   } else {
+err:
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
