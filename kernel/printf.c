@@ -121,6 +121,7 @@ panic(char *s)
   printf("panic: ");
   printf(s);
   printf("\n");
+  backtrace();
   panicked = 1; // freeze uart output from other CPUs
   for(;;)
     ;
@@ -131,4 +132,14 @@ printfinit(void)
 {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
+}
+
+void backtrace(void) //backtrace函数的实现
+{
+  uint64 file = r_fp(), top = PGROUNDUP(file);
+  printf("backtrace:\n");
+  for(; file < top; file = *((uint64*)(file-16))) 
+  {
+    printf("%p\n", *((uint64*)(file-8)));
+  }
 }

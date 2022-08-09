@@ -352,3 +352,11 @@ sfence_vma()
 
 typedef uint64 pte_t;
 typedef uint64 *pagetable_t; // 512 PTEs
+
+
+static inline uint64 r_fp()//内联函数，进行读取
+{
+  uint64 m;
+  asm volatile("mv %0, s0" : "=r"(m));
+  return m;
+}
