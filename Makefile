@@ -153,6 +153,7 @@ UPROGS=\
 	$U/_sysinfotest\
 
 
+
 ifeq ($(LAB),trap)
 UPROGS += \
 	$U/_call\
