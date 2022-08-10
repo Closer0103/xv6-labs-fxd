@@ -56,13 +56,6 @@ exec(char *path, char **argv)
       goto bad;
     if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
       goto bad;
-    
-    /*
-    if(sz1 >= PLIC) 
-    {
-      goto bad;
-    }
-    */
   }
   iunlockput(ip);
   end_op();
@@ -114,10 +107,6 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
-
-  /*重新建立映射*/
-  uvmunmap(p->kernel_pgtbl, 0, PGROUNDUP(oldsz)/PGSIZE, 0);
-  kvmcopymappings(pagetable, p->kernel_pgtbl, 0, sz);
     
   // Commit to the user image.
   oldpagetable = p->pagetable;
@@ -127,10 +116,10 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
-  if(p->pid==1)
-  {
-    vmprint(p->pagetable);
-  }
+  if (p->pid == 1)
+      vmprint(p->pagetable);
+  setupuvm2kvm(p->pagetable, p->kpagetable, p->sz, 0);
+
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:
