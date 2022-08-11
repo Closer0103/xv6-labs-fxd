@@ -503,7 +503,7 @@ uint64 sys_mmap(void)
   {
     return -1;
   }
-  // 判断flag和prot的参数是否正确
+  //判断参数的正确性
   if (flags != MAP_SHARED && flags != MAP_PRIVATE) 
   {
     return -1;
@@ -512,14 +512,12 @@ uint64 sys_mmap(void)
   {
     return -1;
   }
-  // 判断len和offset的参数是否正确
   if (len < 0 || offset < 0 || offset % PGSIZE) 
   {
     return -1;
   }
 
-  // 分配VMA空间
-  for (i = 0; i < NVMA; ++i) 
+  for (i = 0; i < NVMA; ++i) //分配VMA空间
   {
     if (!p->vma[i].addr) 
     {
@@ -532,12 +530,11 @@ uint64 sys_mmap(void)
     return -1;
   }
 
-  //假定address恒为0，但自己实现时不让其恒为0
   addr = MMAPMINADDR;
   for (i = 0; i < NVMA; ++i) 
   {
-    if (p->vma[i].addr) {
-      // 获取到当前内存映射的最高地址空间 
+    if (p->vma[i].addr) 
+    {
       addr = max(addr, p->vma[i].addr + p->vma[i].len);
     }
   }
@@ -552,7 +549,7 @@ uint64 sys_mmap(void)
   vma->flags = flags;
   vma->offset = offset;
   vma->f = f;
-  filedup(f);     // 增加文件引用计数
+  filedup(f);     
 
   return addr;
 }
@@ -566,7 +563,7 @@ uint64 sys_munmap(void)
   uint maxsz, n, n1;
   int i;
 
-  //进行参数判断
+  //判断参数
   if (argaddr(0, &addr) < 0 || argint(1, &len) < 0) 
   {
     return -1;
@@ -576,7 +573,7 @@ uint64 sys_munmap(void)
     return -1;
   }
 
-  // 找到其对应的vma
+  // 找到对应的VMA值
   for (i = 0; i < NVMA; ++i) 
   {
     if (p->vma[i].addr && addr >= p->vma[i].addr&& addr + len <= p->vma[i].addr + p->vma[i].len) 
@@ -597,7 +594,6 @@ uint64 sys_munmap(void)
 
   if ((vma->flags & MAP_SHARED)) 
   {
-    // 一次能够写入的最大字节数
     maxsz = ((MAXOPBLOCKS - 1 - 1 - 2) / 2) * BSIZE;
     for (va = addr; va < addr + len; va += PGSIZE) 
     {
@@ -605,7 +601,7 @@ uint64 sys_munmap(void)
       {
         continue;
       }
-      // 只需把脏页写入文件当中即可
+      
       n = min(PGSIZE, addr + len - va);
       for (i = 0; i < n; i += n1)
        {
@@ -624,7 +620,7 @@ uint64 sys_munmap(void)
     }
   }
   uvmunmap(p->pagetable, addr, (len - 1) / PGSIZE + 1, 1);
-  // 更新vma结构体
+  
   if (addr == vma->addr && len == vma->len) 
   {
     vma->addr = 0;

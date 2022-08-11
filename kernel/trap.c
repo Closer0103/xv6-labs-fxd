@@ -82,7 +82,7 @@ usertrap(void)
     // find the VMA
     for (i = 0; i < NVMA; ++i) 
     {
-      //判断地址是否有效
+      //判断地址的有效性
       if (p->vma[i].addr && va >= p->vma[i].addr&& va < p->vma[i].addr + p->vma[i].len) 
       {
         vma = &p->vma[i];
@@ -93,7 +93,7 @@ usertrap(void)
     {
       goto err;
     }
-    // 给对应的页设置脏页标记
+    
     if (r_scause() == 15 && (vma->permisson & PROT_WRITE)&& walkaddr(p->pagetable, va)) 
     {
       if (uvmsetdirtywrite(p->pagetable, va)) 
@@ -101,8 +101,8 @@ usertrap(void)
         goto err;
       }
     }
-    else//分配一个新物理页并对其进行初始化 
-    {
+    else
+    {//分配新物理页，并对其初始化处理
       if ((pa = kalloc()) == 0) 
       {
         goto err;
@@ -119,7 +119,7 @@ usertrap(void)
       {
         flags |= PTE_R;
       }
-      // 给刚分配的页设置对应权限
+      // 为分配的页设置权限
       if (r_scause() == 15 && (vma->permisson & PROT_WRITE)) 
       {
         flags |= PTE_W | PTE_D;
