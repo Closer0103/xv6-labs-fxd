@@ -158,8 +158,8 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    //if(*pte & PTE_V)
-    //  panic("remap");
+    if(*pte & PTE_V)
+      panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -183,9 +183,11 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
-      continue; //panic("uvmunmap: walk");
+      continue;
+      //panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0)
-      continue; //panic("uvmunmap: not mapped");
+      //panic("uvmunmap: not mapped");
+      continue;
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -285,7 +287,7 @@ freewalk(pagetable_t pagetable)
       freewalk((pagetable_t)child);
       pagetable[i] = 0;
     } else if(pte & PTE_V){
-      // panic("freewalk: leaf");
+      panic("freewalk: leaf");
     }
   }
   kfree((void*)pagetable);
@@ -317,9 +319,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      continue; // panic("uvmcopy: pte should exist");
+      continue;
+      //panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
-      continue; // panic("uvmcopy: page not present");
+      continue;
+      //panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -361,16 +365,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0) {
-      if (va0 > myproc()->sz)
-        return -1;
-      pa0 = (uint64) kalloc();
-      if (pa0 == 0)
-        return -1;
-      if (mappages(pagetable, va0, PGSIZE, pa0, PTE_R | PTE_W | PTE_U) != 0) {
-        return -1;
-      }
-    }
+    if(pa0 == 0)
+      return -1;
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -394,16 +390,8 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0) {
-      if (va0 > myproc()->sz)
-        return -1;
-      pa0 = (uint64) kalloc();
-      if (pa0 == 0)
-        return -1;
-      if (mappages(pagetable, va0, PGSIZE, pa0, PTE_R | PTE_W | PTE_U) != 0) {
-        return -1;
-      }
-    }
+    if(pa0 == 0)
+      return -1;
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
@@ -429,16 +417,8 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   while(got_null == 0 && max > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0) {
-      if (va0 > myproc()->sz)
-        return -1;
-      pa0 = (uint64) kalloc();
-      if (pa0 == 0)
-        return -1;
-      if (mappages(pagetable, va0, PGSIZE, pa0, PTE_R | PTE_W | PTE_U) != 0) {
-        return -1;
-      }
-    }
+    if(pa0 == 0)
+      return -1;
     n = PGSIZE - (srcva - va0);
     if(n > max)
       n = max;
@@ -465,4 +445,60 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+// Lazy alloc for write read and pipe
+int
+lazy_wr_alloc(uint64 va, struct proc *p)
+{
+  if(va >= p->sz || va < PGROUNDDOWN(p->trapframe->sp)) {
+    //printf("lazy wr alloc error: va higher than sz\n");
+    return -1;
+  }
+
+  char *mem = kalloc();
+  if(mem == 0){
+    //printf("lazy wr alloc error: no more memory\n");
+    p->killed = 1;
+    return -1;
+  }
+
+  memset(mem, 0, PGSIZE);
+  if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_U) != 0){
+    kfree(mem);
+    //printf("lazy wr alloc error: map error\n");
+    p->killed = 1;
+    return -1;
+  }
+
+  return 0;
+}
+
+// Lazy alloc for sbrk
+int
+lazy_alloc(uint64 stval, struct proc *p)
+{
+  uint64 va = PGROUNDDOWN(stval);
+  if(stval >= p->sz || stval < PGROUNDDOWN(p->trapframe->sp)) {
+    //printf("lazy alloc error: va higher than sz or below user stack\n");
+    p->killed = 1;
+    return -1;
+  }
+
+  char *mem = kalloc();
+  if(mem == 0){
+    //printf("lazy alloc error: no more memory\n");
+    p->killed = 1;
+    return -1;
+  }
+
+  memset(mem, 0, PGSIZE);
+  if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_U) != 0){
+    kfree(mem);
+    //printf("lazy alloc error: map error\n");
+    p->killed = 1;
+    return -1;
+  }
+
+  return 0;
 }
